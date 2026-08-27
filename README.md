@@ -24,7 +24,7 @@ implemented. Model training and evaluation are not yet complete.
 
 ```
 predicting_moa_from_cell_morphology/
-├── data/   #Raw BBC021 images and metadata
+├── data/       #Raw BBC021 images and metadata
 ├── mappings/   #MoA label <--> integer mappings (generated)
 ├── results/    #Evaluation outputs (planned)
 ├── models/     #Saved model checkpoints (planned)

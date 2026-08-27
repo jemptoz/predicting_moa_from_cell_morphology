@@ -35,7 +35,8 @@ def create_loco_folds(dataset):
         yield development_indices, test_indices, test_compound
 
 def create_validation_split(dataset, development_indices,
-                            val_ratio=0.2, min_compounds_per_moa=2, seed=42):
+                            val_ratio=0.2, min_compounds_per_moa=2, seed=42,
+                            verbose=False):
     """
     Create validation and training splits from the development set using
     compound-based stratification.
@@ -106,12 +107,13 @@ def create_validation_split(dataset, development_indices,
         development_metadata["Image_Metadata_Compound"].isin(val_compounds)
     ].index.tolist()
 
-    print(f"\nSplit Summary:")
-    print(f"  Training compounds: {len(set(train_compounds))}")
-    print(f"  Validation compounds: {len(set(val_compounds))}")
-    print(f"  Training images: {len(train_indices)}")
-    print(f"  Validation images: {len(val_indices)}")
-    print(f"  Total images: {len(train_indices) + len(val_indices)}")
+    if verbose:
+        print(f"\nSplit Summary:")
+        print(f"  Training compounds: {len(set(train_compounds))}")
+        print(f"  Validation compounds: {len(set(val_compounds))}")
+        print(f"  Training images: {len(train_indices)}")
+        print(f"  Validation images: {len(val_indices)}")
+        print(f"  Total images: {len(train_indices) + len(val_indices)}")
 
     return train_indices, val_indices
 
