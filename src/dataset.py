@@ -2,7 +2,6 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import torch
-from PIL import Image
 import tifffile
 from torch.utils.data import Dataset
 from src.utils import create_moa_label_mapping

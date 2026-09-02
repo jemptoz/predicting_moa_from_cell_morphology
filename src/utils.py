@@ -1,4 +1,6 @@
 import json
+import random
+
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from pathlib import Path
@@ -78,3 +80,23 @@ def total_rss_gb():
         except psutil.NoSuchProcess:
             pass
     return total / 1024**3
+
+def set_seed(seed=42):
+    """
+    Set seed for reproducibility.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def seed_worker(worker_id):
+    """
+    Set seed for reproducibility in Dataloader.
+    """
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)

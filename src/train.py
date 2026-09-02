@@ -4,12 +4,9 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 from tqdm import tqdm
-from src.utils import calculate_class_weights
+from src.utils import calculate_class_weights, total_rss_gb
 from sklearn.metrics import f1_score
-import psutil
 from pathlib import Path
-
-MODEL_SAVE_PATH = Path(__file__).resolve().parent.parent / "models"
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
@@ -89,13 +86,14 @@ def train_model(
         val_loader,
         num_epochs,
         device,
+        save_dir,
+        save_name,
         learning_rate=1e-4,
         weight_decay=1e-4,
         early_stopping_patience=8,
         scheduler_patience=3,
         save_best_model=False,
-        save_dir= MODEL_SAVE_PATH,
-        save_name="best_model.pth"
+        verbose=False
 ):
 
     model.to(device)
@@ -157,13 +155,18 @@ def train_model(
         history["val_loss"].append(val_loss)
         history["val_macro_f1"].append(val_f1)
 
-        print(
-            f"Epoch {epoch + 1}/{num_epochs} | "
-            f"Train loss: {train_loss:.4f} | "
-            f"Train Macro F1: {train_f1:.3f} | "
-            f"Val loss: {val_loss:.4f} | "
-            f"Val Macro F1: {val_f1:.3f}"
-        )
+        if verbose:
+            print(
+                f"Epoch {epoch + 1}/{num_epochs} | "
+                f"Train loss: {train_loss:.4f} | "
+                f"Train Macro F1: {train_f1:.3f} | "
+                f"Val loss: {val_loss:.4f} | "
+                f"Val Macro F1: {val_f1:.3f}"
+            )
+            total_rss = total_rss_gb()
+            print(f" Total RSS memory: {total_rss:.2f} GB | "
+                  f" MPS allocated: {torch.mps.current_allocated_memory() / 1024 ** 3:.2f} GB | "
+                  f" MPS driver reserved: {torch.mps.driver_allocated_memory() / 1024 ** 3:.2f} GB")
 
 
         if val_f1 > best_val_f1:
@@ -179,13 +182,13 @@ def train_model(
                     'val_macro_f1': val_f1,
                     'val_loss': val_loss
                 }, os.path.join(save_dir, save_name))
-                print(f"Best model saved (val_f1: {val_f1:.4f})")
+                if verbose: print(f"Best model saved (val_f1: {val_f1:.4f})")
 
         else :
             patience_counter += 1
 
         if patience_counter >= early_stopping_patience:
-            print(f"Early stopping after {epoch + 1} epochs")
+            if verbose: print(f"Early stopping after {epoch + 1} epochs")
             break
 
 

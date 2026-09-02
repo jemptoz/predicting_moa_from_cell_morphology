@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 from torchvision.transforms import Compose
+from src.utils import seed_worker
 
 
 def resize_and_crop(image, target_size= (224,224) ):
@@ -167,7 +168,7 @@ class TransformedSubset(Subset):
         return [self.__getitem__(idx) for idx in indices]
 
 def create_dataloaders(dataset, train_indices, val_indices, test_indices,
-                       batch_size=32, num_workers=4):
+                       batch_size=32, num_workers=4, seed=42):
     """
     Create training and validation dataloaders.
 
@@ -195,6 +196,9 @@ def create_dataloaders(dataset, train_indices, val_indices, test_indices,
     test_loader : DataLoader
         Data loader for the test set.
     """
+    g = torch.Generator()
+    g.manual_seed(seed)
+
     train_subset = TransformedSubset(
         dataset,
         train_indices,
@@ -217,7 +221,9 @@ def create_dataloaders(dataset, train_indices, val_indices, test_indices,
         train_subset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers
+        num_workers=num_workers,
+        worker_init_fn=seed_worker,
+        generator=g
     )
 
     val_loader = DataLoader(
