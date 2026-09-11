@@ -109,3 +109,7 @@ class BBC021Dataset(Dataset):
     def get_compounds(self):
         """Return the unique compounds in the dataset."""
         return self.metadata["Image_Metadata_Compound"].unique()
+
+    def get_compound_set(self, indices):
+        """Return the set of compounds corresponding to given indices."""
+        return set(self.metadata.iloc[indices]["Image_Metadata_Compound"])

@@ -4,14 +4,18 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 from tqdm import tqdm
-from src.utils import calculate_class_weights, total_rss_gb
+from src.utils import calculate_class_weights
 from sklearn.metrics import f1_score
 from pathlib import Path
+from copy import deepcopy
+from time import perf_counter
+import numpy as np
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
 
     running_loss = 0.0
+    loss_denominator = 0.0
     all_preds = []
     all_labels = []
 
@@ -29,7 +33,13 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item() * images.size(0)
+        batch_denominator = (
+            criterion.weight[labels].sum().item()
+            if criterion.weight is not None
+            else labels.numel()
+        )
+        running_loss += loss.item() * batch_denominator
+        loss_denominator += batch_denominator
 
         preds = outputs.argmax(dim=1)
 
@@ -43,7 +53,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     epoch_f1 = f1_score(
         all_labels,
         all_preds,
-        average="macro"
+        labels=np.unique(all_labels),
+        average="macro",
+        zero_division=0
     )
 
     return epoch_loss, epoch_f1
@@ -52,6 +64,7 @@ def val_one_epoch(model, dataloader, criterion, device):
     model.eval()
 
     running_loss = 0.0
+    loss_denominator = 0.0
     all_preds = []
     all_labels = []
 
@@ -63,19 +76,29 @@ def val_one_epoch(model, dataloader, criterion, device):
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-            running_loss += loss.item() * images.size(0)
+            batch_denominator = (
+                criterion.weight[labels].sum().item()
+                if criterion.weight is not None
+                else labels.numel()
+            )
+            running_loss += loss.item() * batch_denominator
+            loss_denominator += batch_denominator
 
             preds = outputs.argmax(dim=1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
-        epoch_loss = running_loss / len(dataloader.dataset)
+        if loss_denominator == 0:
+            raise ValueError("Cannot calculate loss for an empty dataloader.")
+        epoch_loss = running_loss / loss_denominator
 
         epoch_f1 = f1_score(
             all_labels,
             all_preds,
-            average="macro"
+            labels=np.unique(all_labels),
+            average="macro",
+            zero_division=0
         )
 
         return epoch_loss, epoch_f1
@@ -92,8 +115,8 @@ def train_model(
         weight_decay=1e-4,
         early_stopping_patience=8,
         scheduler_patience=3,
-        save_best_model=False,
-        verbose=False
+        verbose=False,
+        save_best_model=True
 ):
 
     model.to(device)
@@ -119,19 +142,22 @@ def train_model(
     )
 
     history = {
+        "epoch": [],
         "train_loss": [],
         "train_macro_f1": [],
         "val_loss": [],
         "val_macro_f1": [],
+        "learning_rate": [],
+        "epoch_seconds": [],
     }
 
-    if save_best_model:
-        os.makedirs(save_dir, exist_ok=True)
-
-    best_val_f1 = 0
+    best_val_f1 = float("-inf")
+    best_state = None
     patience_counter = 0
 
     for epoch in range(num_epochs):
+        epoch_start = perf_counter()
+        epoch_learning_rate = optimizer.param_groups[0]["lr"]
 
         train_loss, train_f1 = train_one_epoch(
             model,
@@ -150,10 +176,13 @@ def train_model(
 
         scheduler.step(val_loss)
 
+        history["epoch"].append(epoch + 1)
         history["train_loss"].append(train_loss)
         history["train_macro_f1"].append(train_f1)
         history["val_loss"].append(val_loss)
         history["val_macro_f1"].append(val_f1)
+        history["learning_rate"].append(epoch_learning_rate)
+        history["epoch_seconds"].append(perf_counter() - epoch_start)
 
         if verbose:
             print(
@@ -163,11 +192,6 @@ def train_model(
                 f"Val loss: {val_loss:.4f} | "
                 f"Val Macro F1: {val_f1:.3f}"
             )
-            total_rss = total_rss_gb()
-            print(f" Total RSS memory: {total_rss:.2f} GB | "
-                  f" MPS allocated: {torch.mps.current_allocated_memory() / 1024 ** 3:.2f} GB | "
-                  f" MPS driver reserved: {torch.mps.driver_allocated_memory() / 1024 ** 3:.2f} GB")
-
 
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
@@ -183,6 +207,11 @@ def train_model(
                     'val_loss': val_loss
                 }, os.path.join(save_dir, save_name))
                 if verbose: print(f"Best model saved (val_f1: {val_f1:.4f})")
+            else:
+                best_state = deepcopy({
+                    name: tensor.detach().cpu()
+                    for name, tensor in model.state_dict().items()
+                })
 
         else :
             patience_counter += 1
@@ -191,6 +220,8 @@ def train_model(
             if verbose: print(f"Early stopping after {epoch + 1} epochs")
             break
 
+    if not save_best_model:
+        model.load_state_dict(best_state)
 
     return history
 

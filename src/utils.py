@@ -7,8 +7,6 @@ from pathlib import Path
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
 import torch
-import psutil
-import os
 
 
 DEFAULT_MAPPING_PATH = Path(__file__).resolve().parent.parent / "mappings" / "moa_label_map.json"
@@ -71,16 +69,6 @@ def calculate_class_weights(dataset, train_indices):
 
     return torch.tensor(class_weights, dtype=torch.float32)
 
-def total_rss_gb():
-    proc = psutil.Process(os.getpid())
-    total = proc.memory_info().rss
-    for child in proc.children(recursive=True):
-        try:
-            total += child.memory_info().rss
-        except psutil.NoSuchProcess:
-            pass
-    return total / 1024**3
-
 def set_seed(seed=42):
     """
     Set seed for reproducibility.
@@ -100,3 +88,4 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+

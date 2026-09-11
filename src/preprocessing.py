@@ -223,21 +223,24 @@ def create_dataloaders(dataset, train_indices, val_indices, test_indices,
         shuffle=True,
         num_workers=num_workers,
         worker_init_fn=seed_worker,
-        generator=g
+        generator=g,
+        persistent_workers=num_workers > 0
     )
 
     val_loader = DataLoader(
         val_subset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0
     )
 
     test_loader = DataLoader(
         test_subset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0
     )
 
     return train_loader, val_loader, test_loader

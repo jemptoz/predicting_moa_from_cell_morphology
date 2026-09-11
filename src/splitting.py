@@ -1,16 +1,24 @@
 import numpy as np
 
-def create_loco_folds(dataset):
+def create_loco_folds(dataset, num_folds=None, seed=42):
     """
     Create leave-one-compound-out cross validation folds.
 
     Each fold holds out all images belonging to one compound as the
     test set and uses all remaining compounds as the development set.
 
+    When "num_folds" is specified, a reproducible subset of compounds
+    will be selected for testing. Compounds are selected across MoAs
+    so that the test compounds provide broad MoA coverage.
+
     Parameters
     ----------
     dataset : BBBC021Dataset
         Dataset containing the labelled metadata.
+    num_folds : int or None, default=None
+        Number of folds to create. If None, use all.
+    seed : int, default=42
+        Random seed.
 
     Yields
     -------
@@ -21,13 +29,66 @@ def create_loco_folds(dataset):
     test_compound : str
         Compound held out for testing.
     """
+    all_compounds = dataset.get_compounds()
 
-    compounds = dataset.get_compounds()
+    if num_folds is not None and not 1 <= num_folds <= len(all_compounds):
+        raise ValueError(
+            f"num_folds must be between 1 and {len(all_compounds)}, or None"
+        )
+
+    if num_folds is None:
+        compounds = all_compounds
+    else:
+        moa_compounds = (
+            dataset.metadata
+            .groupby("moa")["Image_Metadata_Compound"]
+            .unique()
+        )
+
+        rng = np.random.default_rng(seed)
+
+        moa_compound_lists = {
+            moa: rng.permutation(compound_list).tolist()
+            for moa, compound_list in moa_compounds.items()
+        }
+
+        selected_compounds = []
+
+        moa_list = list(moa_compounds.keys())
+        rng.shuffle(moa_list)
+        for moa in moa_list:
+            if len(selected_compounds) >= num_folds:
+                break
+            if moa_compound_lists[moa]:
+                selected_compounds.append(
+                    moa_compound_lists[moa].pop()
+                )
+        while len(selected_compounds) < num_folds:
+            available_moa = [
+                moa
+                for moa, compounds_for_moa in moa_compound_lists.items()
+                if compounds_for_moa
+            ]
+            if not available_moa:
+                break
+
+            rng.shuffle(available_moa)
+
+            for moa in available_moa:
+                if len(selected_compounds) >= num_folds:
+                    break
+
+                selected_compounds.append(
+                    moa_compound_lists[moa].pop()
+                )
+
+        compounds = selected_compounds
 
     for test_compound in compounds:
         test_indices = dataset.get_indices_for_compound(test_compound)
+
         development_indices = [
-            idx for compound in compounds
+            idx for compound in all_compounds
             if compound != test_compound
             for idx in dataset.get_indices_for_compound(compound)
         ]
@@ -35,8 +96,7 @@ def create_loco_folds(dataset):
         yield development_indices, test_indices, test_compound
 
 def create_validation_split(dataset, development_indices,
-                            val_ratio=0.2, min_compounds_per_moa=2, seed=42,
-                            verbose=False):
+                            val_ratio=0.2, min_compounds_per_moa=2, seed=42):
     """
     Create validation and training splits from the development set using
     compound-based stratification.
@@ -103,17 +163,10 @@ def create_validation_split(dataset, development_indices,
     train_indices = development_metadata[
         development_metadata["Image_Metadata_Compound"].isin(train_compounds)
     ].index.tolist()
+
     val_indices = development_metadata[
         development_metadata["Image_Metadata_Compound"].isin(val_compounds)
     ].index.tolist()
-
-    if verbose:
-        print(f"\nSplit Summary:")
-        print(f"  Training compounds: {len(set(train_compounds))}")
-        print(f"  Validation compounds: {len(set(val_compounds))}")
-        print(f"  Training images: {len(train_indices)}")
-        print(f"  Validation images: {len(val_indices)}")
-        print(f"  Total images: {len(train_indices) + len(val_indices)}")
 
     return train_indices, val_indices
 
