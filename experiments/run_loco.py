@@ -22,14 +22,14 @@ import numpy as np
 import sklearn
 
 def run_loco(experiment_name, num_folds, num_epochs, seed,
-             verbose=None, save_best_model= None, device=None
+             verbose=None, save_best_model= None, device=None, resume=False
              ):
     """
 
     """
     #DataLoader
     batch_size = 32
-    num_workers = 4
+    num_workers = 2
     #Model
     learning_rate = 1e-4
     weight_decay = 1e-4
@@ -59,9 +59,13 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
     MODEL_PATH = BASE_DIR /"models"/experiment_name
     RESULTS_PATH = BASE_DIR /"results"/experiment_name
 
-    for directory in (MODEL_PATH, RESULTS_PATH):
-        if directory.exists() and any(directory.iterdir()):
-            raise FileExistsError(f"{directory} is not empty. Use a new experiment name.")
+    if resume:
+        if not RESULTS_PATH.exists():
+            raise FileNotFoundError(f"Cannot resume because {RESULTS_PATH} does not exist.")
+    else:
+        for directory in (MODEL_PATH, RESULTS_PATH):
+            if directory.exists() and any(directory.iterdir()):
+                raise FileExistsError(f"{directory} is not empty. Use a new experiment name or pass --resume.")
 
     os.makedirs(RESULTS_PATH, exist_ok=True)
     if save_best_model:
@@ -101,8 +105,37 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
         "numpy_version": np.__version__,
         "pandas_version": pd.__version__,
     }
-    with (RESULTS_PATH / "config.json").open("w") as file:
-        json.dump(config, file, indent=2)
+    config_path = RESULTS_PATH / "config.json"
+
+    if resume:
+        if not config_path.exists():
+            raise FileNotFoundError(f"Cannot resume because {config_path} does not exist.")
+        with config_path.open() as f:
+            previous_config = json.load(f)
+
+        resume_keys = [
+            "experiment_name",
+            "seed",
+            "num_epochs",
+            "num_folds",
+            "batch_size",
+            "learning_rate",
+            "weight_decay",
+            "early_stopping_patience",
+            "scheduler_patience"
+        ]
+
+        mismatches = {
+            key: {"previous": previous_config.get(key), "current": config.get(key)}
+            for key in resume_keys if previous_config.get(key) != config.get(key)
+        }
+
+        if mismatches:
+            raise ValueError("The resume configuration does not match the original run.")
+
+    else:
+        with config_path.open("w") as f:
+            json.dump(config, f, indent=2)
 
     fold_rows = []
     prediction_tables = []
@@ -120,7 +153,7 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
 
         dev_indices, test_indices, test_compound = next(loco_folds)
 
-        train_indices, val_indices = create_validation_split(dataset, dev_indices)
+        train_indices, val_indices = create_validation_split(dataset, dev_indices, seed=seed)
 
         train_compound_set = dataset.get_compound_set(train_indices)
         val_compound_set = dataset.get_compound_set(val_indices)
@@ -161,6 +194,57 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
         split_rows.append(split_details)
         with (RESULTS_PATH / "split_information.json").open("w") as f:
             json.dump(split_rows, f, indent=2)
+
+        split_information.append({
+            "exp_name": experiment_name,
+            "fold": fold + 1,
+            "test_compound": test_compound,
+            "test_moa": ", ".join(sorted(dataset.metadata.iloc[test_indices]["moa"].unique().tolist())),
+            "n_test_images": len(test_indices),
+            "train_compounds": ", ".join(sorted(dataset.metadata.iloc[train_indices]["Image_Metadata_Compound"].unique().tolist())),
+            "train_moa": ", ".join(sorted(dataset.metadata.iloc[train_indices]["moa"].unique().tolist())),
+            "n_train_images": len(train_indices),
+            "val_compounds": ", ".join(sorted(dataset.metadata.iloc[val_indices]["Image_Metadata_Compound"].unique().tolist())),
+            "val_moa": ", ".join(sorted(dataset.metadata.iloc[val_indices]["moa"].unique().tolist())),
+            "n_val_images": len(val_indices)
+        })
+
+        required_fold_files = [
+            "training_history.csv",
+            "training_summary.json",
+            "prediction_table.csv",
+            "metrics.json",
+            "per_class.csv",
+            "confusion_matrix.csv",
+            "confusion_matrix.png"
+        ]
+
+        fold_is_complete = all(
+            (FOLD_PATH / file).exists() for file in required_fold_files
+        )
+
+        if resume and fold_is_complete:
+            if verbose:
+                print(f"Fold {fold+1} is already complete.")
+
+            table = pd.read_csv(FOLD_PATH/"prediction_table.csv")
+            prediction_tables.append(table)
+
+            with (FOLD_PATH / "metrics.json").open() as file:
+                saved_metrics = json.load(file)
+
+            with (FOLD_PATH / "training_summary.json").open() as file:
+                training_summary = json.load(file)
+
+            fold_rows.append({
+                "exp_name": experiment_name,
+                "fold": fold + 1,
+                "test_compound": test_compound,
+                **saved_metrics,
+                **training_summary,
+            })
+
+            continue
 
         train_loader, val_loader, test_loader = create_dataloaders(
             dataset,
@@ -258,20 +342,6 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
             RESULTS_PATH / "results.csv", index=False
         )
 
-        # split_information.append({
-        #     "exp_name": experiment_name,
-        #     "fold": fold + 1,
-        #     "test_compound": test_compound,
-        #     "test_moa": str(dataset.metadata.iloc[test_indices]["moa"].unique()),
-        #     "n_test_images": len(test_indices),
-        #     "train_compounds": str(dataset.metadata.iloc[train_indices]["Image_Metadata_Compound"].unique()),
-        #     "train_moa": str(dataset.metadata.iloc[train_indices]["moa"].unique()),
-        #     "n_train_images": len(train_indices),
-        #     "val_compounds": str(dataset.metadata.iloc[val_indices]["Image_Metadata_Compound"].unique()),
-        #     "val_moa": str(dataset.metadata.iloc[val_indices]["moa"].unique()),
-        #     "n_val_images": len(val_indices)
-        # })
-
         del model, train_loader, val_loader, test_loader
         gc.collect()
         if device == "cuda":
@@ -279,11 +349,11 @@ def run_loco(experiment_name, num_folds, num_epochs, seed,
         elif device == "mps":
             torch.mps.empty_cache()
 
-    # split_info_df = pd.DataFrame(split_information)
-    # split_info_df.to_csv(
-    #     RESULTS_PATH / "split_information.csv",
-    #     index=False
-    # )
+    split_info_df = pd.DataFrame(split_information)
+    split_info_df.to_csv(
+        RESULTS_PATH / "split_information.csv",
+        index=False
+    )
 
     pooled = pd.concat(prediction_tables, ignore_index=True)
 
@@ -341,6 +411,8 @@ def main():
     parser.add_argument("--folds", type=int, required=True)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--resume", action="store_true")
 
     args = parser.parse_args()
 
@@ -349,7 +421,8 @@ def main():
         num_folds=args.folds,
         num_epochs=args.epochs,
         seed=args.seed,
-        verbose=True
+        verbose=args.verbose,
+        resume=args.resume
     )
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
+import sys
 from tqdm import tqdm
 from src.utils import calculate_class_weights
 from sklearn.metrics import f1_score
@@ -19,7 +20,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     all_preds = []
     all_labels = []
 
-    pbar = tqdm(dataloader, desc="Training", leave=False)
+    show_progress = sys.stderr.isatty()
+
+    pbar = tqdm(dataloader, desc="Training", leave=False, disable=not show_progress)
 
     for images, labels in pbar:
         images = images.to(device)
@@ -46,9 +49,13 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
 
-        pbar.set_postfix({"loss": loss.item()})
+        if show_progress:
+            pbar.set_postfix({"loss": loss.item()})
 
-    epoch_loss = running_loss / len(dataloader.dataset)
+    if loss_denominator == 0:
+        raise ValueError("Cannot calculate loss for an empty dataloader.")
+
+    epoch_loss = running_loss / loss_denominator
 
     epoch_f1 = f1_score(
         all_labels,
@@ -68,8 +75,10 @@ def val_one_epoch(model, dataloader, criterion, device):
     all_preds = []
     all_labels = []
 
+    show_progress = sys.stderr.isatty()
+
     with torch.no_grad():
-        for images, labels in tqdm(dataloader, desc="Validation", leave=False):
+        for images, labels in tqdm(dataloader, desc="Validation", leave=False, disable=not show_progress):
             images = images.to(device)
             labels = labels.to(device)
 
