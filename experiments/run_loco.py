@@ -16,13 +16,15 @@ import os
 import gc
 import argparse
 import json
+import hashlib
 import platform
 from time import perf_counter
 import numpy as np
 import sklearn
 
 def run_loco(experiment_name, num_folds, num_epochs, seed,
-             verbose=None, save_best_model= None, device=None, resume=False
+             verbose=None, save_best_model= None, device=None,
+             resume=False,
              ):
     """
 
